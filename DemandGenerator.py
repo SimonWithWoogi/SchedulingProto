@@ -1,4 +1,6 @@
 from Parameters import PreSetInfo
+import math
+import pandas as pd
 
 def Initialize(M=None, P=None, maxQ=None, minQ=None, maxT=None,
                setuptime=None, maxalltime=None, capacity=None,
@@ -25,7 +27,7 @@ def Initialize(M=None, P=None, maxQ=None, minQ=None, maxT=None,
     if setuptime is None:
         setuptime = 1
     if maxalltime is None:
-        maxalltime = 148
+        maxalltime = 148*30
     if capacity is None:
         capacity = 1000
     if distribution is None:
@@ -34,6 +36,46 @@ def Initialize(M=None, P=None, maxQ=None, minQ=None, maxT=None,
     PreSet = PreSetInfo(M, P, maxQ, minQ, maxT, setuptime, maxalltime, capacity, distribution)
     return PreSet
 
+def GenerateDemand(Param):
+    import random
+    baseunit = 100
+    offset = 0
+    demandid = 0
+
+    #Trim 30%를 구현해야 하나, 지금은 Max 30%로
+    nowMax = 0
+    cumDudate = 0
+    tempdic = {0:'A', 1:'B', 2:'C', 3:'D', 4:'E', 5:'F', 6:'G', 7:'H'}
+    Quantity = []
+    DueDate = []
+    Type = []
+    DemandId = []
+    print(math.ceil((Param.LimitationTime() * Param.MachinesNumber() - Param.SetUpTime()) * 0.7))
+    while cumDudate < math.ceil((Param.LimitationTime() * Param.MachinesNumber() - Param.SetUpTime()) * 0.7):
+        for i in range(0, Param.MachinesNumber()):
+            quantity = random.randrange(Param.MinOrderQ(), Param.MaxOrderQ()+baseunit)
+            processtime = math.ceil(quantity / Param.MachineCapa())
+            duedate = random.randrange(processtime, Param.MaxDueDate())
+            duedate = duedate + offset
+            type = tempdic[random.randrange(0, Param.ProductKinds())]
+            # 리스트에 넣어주기
+            Quantity.append(quantity)
+            DueDate.append(duedate)
+            Type.append(type)
+            DemandId.append(demandid)
+
+            if nowMax < (duedate - offset):
+                nowMax = duedate
+            demandid = demandid + 1
+            cumDudate = cumDudate + (duedate - offset)
+        offset = offset + round(nowMax * 0.7)
+    # 엑셀파일로 저장
+    A = pd.Series(DemandId, name='Demand Id')
+    B = pd.Series(Type, name='Type')
+    C = pd.Series(Quantity, name='Quantity')
+    D = pd.Series(DueDate, name='DueDate')
+    SaveData = pd.concat([A, B, C, D], axis=1)
+    SaveData.to_csv('./DataSet/DemandStatement.csv', index=False)
 def main():
     Initialize(16, 4)
     Params = Initialize()
@@ -46,6 +88,7 @@ def main():
     print(Params.LimitationTime())
     print(Params.MachineCapa())
     print(Params.Distribution())
+    temp = GenerateDemand(Params)
 
 if __name__ == '__main__':
     main()
