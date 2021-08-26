@@ -1,6 +1,7 @@
 from Parameters import PreSetInfo
 import math
 import pandas as pd
+import pickle
 
 def Initialize(M=None, P=None, maxQ=None, minQ=None, maxT=None,
                setuptime=None, maxalltime=None, capacity=None,
@@ -77,8 +78,8 @@ def GenerateDemand(Param, Num):
         D = pd.Series(DueDate, name='DueDate')
         SaveData = pd.concat([A, B, C, D], axis=1)
         SaveData.to_csv('./DataSet/DemandStatement' + str(week+1) + '.csv', index=False)
+
 def main():
-    Initialize(16, 4)
     Params = Initialize()
     print(Params.MachinesNumber())
     print(Params.ProductKinds())
@@ -89,7 +90,9 @@ def main():
     print(Params.LimitationTime())
     print(Params.MachineCapa())
     print(Params.Distribution())
-    temp = GenerateDemand(Params, 300)
+    temp = GenerateDemand(Params, 10000)
+    with open('Params.p', 'wb') as file:
+        pickle.dump(Params, file)
 
 if __name__ == '__main__':
     main()
