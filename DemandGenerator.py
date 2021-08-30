@@ -18,7 +18,7 @@ def Initialize(M=None, P=None, maxQ=None, minQ=None, maxT=None,
     if M is None:
         M = 17
     if P is None:
-        P = 8
+        P = 12
     if maxQ is None:
         maxQ = 8000
     if minQ is None:
@@ -46,7 +46,6 @@ def GenerateDemand(Param, Num):
     #Trim 30%를 구현해야 하나, 지금은 Max 30%로
     nowMax = 0
     cumDudate = 0
-    tempdic = {0:'A', 1:'B', 2:'C', 3:'D', 4:'E', 5:'F', 6:'G', 7:'H'}
     Quantity = []
     DueDate = []
     Type = []
@@ -59,7 +58,7 @@ def GenerateDemand(Param, Num):
                 processtime = math.ceil(quantity / Param.MachineCapa())
                 duedate = random.randrange(processtime, Param.MaxDueDate())
                 duedate = duedate + offset
-                type = tempdic[random.randrange(0, Param.ProductKinds())]
+                type = chr(65 + random.randrange(0, Param.ProductKinds()))
                 # 리스트에 넣어주기
                 Quantity.append(quantity)
                 DueDate.append(duedate)
