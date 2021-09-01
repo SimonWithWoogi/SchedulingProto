@@ -39,10 +39,8 @@ class Agent:
         self.avg_q_max, self.avg_loss = 0, 0
     def build_model(self):
         model = Sequential()
-        model.add(Conv2D(32, (8, 8), strides=(4, 4), activation='relu',
+        model.add(Conv2D(64, (3, 3), strides=(4, 4), activation='relu',
                          input_shape=self.state_size))
-        model.add(Conv2D(64, (4, 4), strides=(2, 2), activation='relu'))
-        model.add(Conv2D(64, (3, 3), strides=(1, 1), activation='relu'))
         model.add(Flatten())
         model.add(Dense(50, activation='relu'))
         model.add(Dense(self.action_size))

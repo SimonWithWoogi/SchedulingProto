@@ -1,5 +1,5 @@
 import pickle
-
+import pandas as pd
 class Env():
     def __init__(self):
         with open('Params.p', 'rb') as file:
@@ -8,9 +8,14 @@ class Env():
         self.score = 0
         self.score_weight = []
         self.counter = 0
-def step(action):
 
-    return reward, setup, violation
+    def Reset(Path):
+        DataSet = pd.read_csv(Path)
+        return DataSet
+
+    def step(action):
+
+        return None
 
 def RewardFunction(setup, violation):
     Reward = 1 - (5 * violation)

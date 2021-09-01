@@ -76,7 +76,7 @@ def GenerateDemand(Param, Num):
         C = pd.Series(Quantity, name='Quantity')
         D = pd.Series(DueDate, name='DueDate')
         SaveData = pd.concat([A, B, C, D], axis=1)
-        SaveData.to_csv('./DataSet/DemandStatement' + str(week+1) + '.csv', index=False)
+        SaveData.to_csv('./DemandSet/DemandStatement' + str(week+1) + '.csv', index=False)
 
 def main():
     Params = Initialize()
@@ -89,7 +89,7 @@ def main():
     print(Params.LimitationTime())
     print(Params.MachineCapa())
     print(Params.Distribution())
-    temp = GenerateDemand(Params, 10000)
+    temp = GenerateDemand(Params, 100000)
     with open('Params.p', 'wb') as file:
         pickle.dump(Params, file)
 
