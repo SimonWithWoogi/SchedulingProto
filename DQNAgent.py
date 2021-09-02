@@ -22,14 +22,14 @@ class Agent:
         self.epsilon = 1.
         self.epsilon_start, self.epsilon_end = 1.0, 0.1
         self.exploration_steps = 1000000.
-        self.epsilon_dcay_step = (self.epsilon_start - self.epsilon_end)\
+        self.epsilon_decay_step = (self.epsilon_start - self.epsilon_end)\
                                  / self.exploration_steps
-        self.batch_size = 32
-        self.train_start = 20000
+        self.batch_size = 128
+        self.train_start = 15000
         self.update_target_rate = 10000
         self.discount_factor = 0.99
         # 리플레이 메모리
-        self.memoery = deque(maxlen=20000)
+        self.memory = deque(maxlen=150000)
         self.no_op_steps = 30
         # 모델과 타겟모델 생성, 초기화
         self.model = self.build_model()
@@ -42,7 +42,8 @@ class Agent:
         model.add(Conv2D(64, (3, 3), strides=(4, 4), activation='relu',
                          input_shape=self.state_size))
         model.add(Flatten())
-        model.add(Dense(50, activation='relu'))
+        model.add(Dense(64, activation='relu'))
+        model.add(Dense(32, activation='sigmoid'))
         model.add(Dense(self.action_size))
         model.summary()
         return model
@@ -70,11 +71,15 @@ class Agent:
         train = K.function([self.model.input, a, y], [loss], updates=updates)
 
         return train
+
+    def getActionMinMachine(self, state):
+        return np.argmin(state[:, 0])
+
     # 입실론 탐욕 정책으로 행동 선택
     def get_action(self, history):
-        history = np.float32(history / 255.0)
+        #history = np.float32(history / history.max(axis=0))
         if np.random.rand() <= self.epsilon:
-            return random.randrange(self.action_size)
+            return self.getActionMinMachine(history[0, :, :, 0])
         else:
             q_value = self.model.predict(history)
             return np.argmax(q_value[0])
@@ -98,8 +103,10 @@ class Agent:
         action, reward = [], []
 
         for i in range(self.batch_size):
-            history[i] = np.float32(mini_batch[i][0] / 255.)
-            next_history[i] = np.float32(mini_batch[i][3] / 255.)
+            #history[i] = np.float32(mini_batch[i][0] / 255.)
+            #next_history[i] = np.float32(mini_batch[i][3] / 255.)
+            history[i] = np.float32(mini_batch[i][0])
+            next_history[i] = np.float32(mini_batch[i][3])
             action.append(mini_batch[i][1])
             reward.append(mini_batch[i][2])
 
