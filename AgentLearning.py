@@ -9,7 +9,7 @@ import JobSchedule
 from JobSchedule import Env
 from DQNAgent import Agent
 
-EPIOSDE = 3000
+EPIOSDE = 6000
 TIME_BOUNDARY = 4
 
 def pre_processing(oldState, type = 0, quantity = 0, duedate = 0):
@@ -22,19 +22,20 @@ def pre_processing(oldState, type = 0, quantity = 0, duedate = 0):
         Demand_DueDate = duedate
         Demand_Type = type
         Violation = int(single[7])
+        Machine_id = int(single[8])
         if Last_type != type & Last_type != 0:
             SetUp_Warning = 1
         else:
             SetUp_Warning = 0
         State.append([Facility_time, Last_type, Start_time, Demand_Quantity,
-                      Demand_DueDate, Demand_Type, SetUp_Warning, Violation])
+                      Demand_DueDate, Demand_Type, SetUp_Warning, Violation, Machine_id])
     return State
 
 def main():
     with open('Params.p', 'rb') as file:
         Params = pickle.load(file)
     State_name = ['Facility time', 'Last type', 'Start Time', 'Demand Quantity',
-                  'Demand DueDate', 'Demand Type', 'SetUp Warning', 'Violation Time']
+                  'Demand DueDate', 'Demand Type', 'SetUp Warning', 'Violation Time', 'Machine Id']
     ScheduleTable = Env()
     agent = Agent(action_size=Params.MachinesNumber(),
                   state_size=(Params.MachinesNumber(), len(State_name), TIME_BOUNDARY))
@@ -47,7 +48,9 @@ def main():
     run = True
     for epi in range(EPIOSDE):
         allreward = 0
-        episode = ScheduleTable.Reset(Path='./DemandSet/DemandStatement' + str(epi + 1) + '.csv')
+        #episode = ScheduleTable.Reset(Path='./DemandSet/DemandStatement' + str(epi + 1) + '.csv')
+        episode = ScheduleTable.Reset(Path='./DemandSet/DemandStatement' + str(0 + 1) + '.csv')
+
         OutputTable = pd.DataFrame(columns=['Demand Id', 'Machine Id', 'Type',
                                             'Processing Time', 'Start Time', 'Complete Time',
                                             'Due date', 'Set-Up', 'Violation Time'])
@@ -82,7 +85,7 @@ def main():
             next_history = np.append(next_state, history[:, :, :, :3], axis=3)
 
             #agent.avg_q_max += np.amax(agent.model.predict(np.float32(history / history.max(axis=0)))[0])
-            agent.avg_q_max += np.amax(agent.model.predict(history)[0])
+            agent.avg_q_max += np.amax(agent.model.predict(np.float32(history / history.max(axis=1)))[0])
             agent.append_sample(history, action, reward, next_history)
 
             if len(agent.memory) >= agent.train_start:
@@ -99,7 +102,8 @@ def main():
                      agent.avg_q_max / float(index), len(agent.memory)))
         agent.avg_q_max, agent.avg_loss = 0, 0
         agent.model.save_weights("./save_model/breakout_dqn_1.h5")
-        OutputTable.to_csv('./ScheduleTables/ScheduleTable' + str(epi + 1) + '('+ str(ScheduleTable.score) + ').csv', index=False)
+        OutputTable.to_csv('./ScheduleTables/ScheduleTable' + str(epi + 1) + '(' +
+                           str(ScheduleTable.score) + ').csv', index=False)
         start_time = time.time()
 
 if __name__ == '__main__':

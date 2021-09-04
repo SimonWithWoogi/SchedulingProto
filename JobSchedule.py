@@ -49,10 +49,11 @@ def AssignMachine(number, state, Output):  # 액션에 해당
     state[1] = state[5]
     state[2] = stime
     state[7] += violation
+    state[8] = number
 
     return Output.append(rtnDict, ignore_index=True), violation, state
 def RewardFunction(setup, violation):
-    Reward = 1 - (5 * violation)
+    Reward = 5 - (5 * violation)
     if setup:
-        Reward = Reward - 2
+        Reward = Reward - 5
     return Reward

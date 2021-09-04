@@ -11,7 +11,8 @@ import numpy as np
 import random
 import copy
 import time
-
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 disable_eager_execution()
 class Agent:
     def __init__(self, action_size, state_size):
@@ -20,7 +21,7 @@ class Agent:
         self.action_size = action_size
         # Define Hyper parameter
         self.epsilon = 1.
-        self.epsilon_start, self.epsilon_end = 1.0, 0.1
+        self.epsilon_start, self.epsilon_end = 1.0, 0.01
         self.exploration_steps = 1000000.
         self.epsilon_decay_step = (self.epsilon_start - self.epsilon_end)\
                                  / self.exploration_steps
@@ -42,8 +43,8 @@ class Agent:
         model.add(Conv2D(64, (3, 3), strides=(4, 4), activation='relu',
                          input_shape=self.state_size))
         model.add(Flatten())
-        model.add(Dense(64, activation='relu'))
-        model.add(Dense(32, activation='sigmoid'))
+        model.add(Dense(32, activation='relu'))
+        model.add(Dense(16, activation='relu'))
         model.add(Dense(self.action_size))
         model.summary()
         return model
@@ -77,10 +78,10 @@ class Agent:
 
     # 입실론 탐욕 정책으로 행동 선택
     def get_action(self, history):
-        #history = np.float32(history / history.max(axis=0))
         if np.random.rand() <= self.epsilon:
             return self.getActionMinMachine(history[0, :, :, 0])
         else:
+            history = np.float32(history / history.max(axis=1))
             q_value = self.model.predict(history)
             return np.argmax(q_value[0])
 
@@ -103,10 +104,8 @@ class Agent:
         action, reward = [], []
 
         for i in range(self.batch_size):
-            #history[i] = np.float32(mini_batch[i][0] / 255.)
-            #next_history[i] = np.float32(mini_batch[i][3] / 255.)
-            history[i] = np.float32(mini_batch[i][0])
-            next_history[i] = np.float32(mini_batch[i][3])
+            history[i] = np.float32(mini_batch[i][0] / mini_batch[i][0].max(axis=1))
+            next_history[i] = np.float32(mini_batch[i][3] / mini_batch[i][3].max(axis=1))
             action.append(mini_batch[i][1])
             reward.append(mini_batch[i][2])
 
@@ -114,7 +113,6 @@ class Agent:
 
         for i in range(self.batch_size):
             target[i] = reward[i] + self.discount_factor * np.amax(target_value[i])
-
         loss = self.optimizer([history, action, target])
         self.avg_loss += loss[0]
     # 각 에피소드 당 학습 정보를 기록
