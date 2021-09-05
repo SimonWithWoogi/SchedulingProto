@@ -9,7 +9,7 @@ import JobSchedule
 from JobSchedule import Env
 from DQNAgent import Agent
 
-EPIOSDE = 6000
+EPIOSDE = 1000000
 TIME_BOUNDARY = 4
 
 def pre_processing(oldState, type = 0, quantity = 0, duedate = 0):
