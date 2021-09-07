@@ -22,11 +22,11 @@ class Agent:
         # Define Hyper parameter
         self.epsilon = 1.
         self.epsilon_start, self.epsilon_end = 1.0, 0.01
-        self.exploration_steps = 1000000.
+        self.exploration_steps = 500000.
         self.epsilon_decay_step = (self.epsilon_start - self.epsilon_end)\
                                  / self.exploration_steps
-        self.batch_size = 128
-        self.train_start = 15000
+        self.batch_size = 32
+        self.train_start = 20000
         self.update_target_rate = 10000
         self.discount_factor = 0.99
         # 리플레이 메모리
@@ -38,15 +38,24 @@ class Agent:
         self.update_target_model()
         self.optimizer = self.optimizer()
         self.avg_q_max, self.avg_loss = 0, 0
-    def build_model(self):
+    def build_model_old(self):
         model = Sequential()
-        model.add(Conv2D(128, (3, 3), strides=(4, 4), activation='relu',
-                         input_shape=self.state_size))
         model.add(Conv2D(64, (3, 3), strides=(4, 4), activation='relu',
                          input_shape=self.state_size))
         model.add(Flatten())
+        model.add(Dense(64, activation='relu'))
         model.add(Dense(32, activation='relu'))
-        model.add(Dense(16, activation='relu'))
+        model.add(Dense(self.action_size))
+        model.summary()
+        return model
+    def build_model(self):
+        model = Sequential()
+        model.add(Conv2D(32, (8, 8), strides=(4, 4), activation='relu',
+                         input_shape=self.state_size))
+        model.add(Conv2D(64, (4, 4), strides=(2, 2), activation='relu'))
+        model.add(Conv2D(64, (3, 3), strides=(1, 1), activation='relu'))
+        model.add(Flatten())
+        model.add(Dense(512, activation='relu'))
         model.add(Dense(self.action_size))
         model.summary()
         return model
@@ -79,11 +88,13 @@ class Agent:
         return np.argmin(state[:, 0])
 
     # 입실론 탐욕 정책으로 행동 선택
-    def get_action(self, history):
+    def get_action(self, history, statelog):
         if np.random.rand() <= self.epsilon:
-            return self.getActionMinMachine(history[0, :, :, 0])
+            return self.getActionMinMachine(np.array(statelog))
+            #return random.randrange(self.action_size)
         else:
-            history = np.float32(history / history.max(axis=1))
+            #history = np.float32(history / history.max(axis=1))
+            history = np.float32(history / 255.0)
             q_value = self.model.predict(history)
             return np.argmax(q_value[0])
 
@@ -106,8 +117,10 @@ class Agent:
         action, reward = [], []
 
         for i in range(self.batch_size):
-            history[i] = np.float32(mini_batch[i][0] / mini_batch[i][0].max(axis=1))
-            next_history[i] = np.float32(mini_batch[i][3] / mini_batch[i][3].max(axis=1))
+            #history[i] = np.float32(mini_batch[i][0] / mini_batch[i][0].max(axis=1))
+            #next_history[i] = np.float32(mini_batch[i][3] / mini_batch[i][3].max(axis=1))
+            history[i] = np.float32(mini_batch[i][0] / 255.)
+            next_history[i] = np.float32(mini_batch[i][3] / 255.)
             action.append(mini_batch[i][1])
             reward.append(mini_batch[i][2])
 

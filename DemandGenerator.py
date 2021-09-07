@@ -28,7 +28,7 @@ def Initialize(M=None, P=None, maxQ=None, minQ=None, maxT=None,
     if setuptime is None:
         setuptime = 1
     if maxalltime is None:
-        maxalltime = 148
+        maxalltime = 168
     if capacity is None:
         capacity = 1000
     if distribution is None:
@@ -58,6 +58,8 @@ def GenerateDemand(Param, Num):
                 processtime = math.ceil(quantity / Param.MachineCapa())
                 duedate = random.randrange(processtime, Param.MaxDueDate())
                 duedate = duedate + offset
+                if duedate > Param.LimitationTime():
+                    continue
                 type = chr(65 + random.randrange(0, Param.ProductKinds()))
                 # 리스트에 넣어주기
                 Quantity.append(quantity)

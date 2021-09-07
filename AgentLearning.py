@@ -38,7 +38,8 @@ def main():
                   'Demand DueDate', 'Demand Type', 'SetUp Warning', 'Violation Time', 'Machine Id']
     ScheduleTable = Env()
     agent = Agent(action_size=Params.MachinesNumber(),
-                  state_size=(Params.MachinesNumber(), len(State_name), TIME_BOUNDARY))
+                  state_size=(168, 168, TIME_BOUNDARY))
+                  #state_size=(Params.MachinesNumber(), len(State_name), TIME_BOUNDARY))
 
     start_time = time.time()
     action_time = time.time()
@@ -54,10 +55,13 @@ def main():
         OutputTable = pd.DataFrame(columns=['Demand Id', 'Machine Id', 'Type',
                                             'Processing Time', 'Start Time', 'Complete Time',
                                             'Due date', 'Set-Up', 'Violation Time'])
-        state = pre_processing(np.zeros((Params.MachinesNumber(), len(State_name))))
+        state = ScheduleTable.getStateImage((168, 168))
         history = np.stack((state, state, state, state), axis=2)
-        history = np.reshape([history],
-                             (1, Params.MachinesNumber(), len(State_name), TIME_BOUNDARY))
+        history = np.reshape([history], (1, 168, 168, 4))
+        statelog = pre_processing(np.zeros((Params.MachinesNumber(), len(State_name))))
+        #history = np.stack((state, state, state, state), axis=2)
+        #history = np.reshape([history],
+        #                     (1, Params.MachinesNumber(), len(State_name), TIME_BOUNDARY))
         for index, step in episode.iterrows():
             end_time = time.time()
 
@@ -72,20 +76,21 @@ def main():
             quantity = step.Quantity
             duedate = step.DueDate
 
-            state = pre_processing(state, type=type,
+            statelog = pre_processing(statelog, type=type,
                                    quantity=math.ceil(quantity / Params.MachineCapa()), duedate=duedate)
-            pre_state = np.reshape([state], (1, Params.MachinesNumber(), len(State_name), 1))
-            history = np.append(pre_state, history[:, :, :, :3], axis=3)
+            ScheduleTable.ScheduleView.UpdateDemand(time=math.ceil(quantity / Params.MachineCapa()),
+                                                    duedate=duedate, type=type)
 
-            action = agent.get_action(history)
+            action = agent.get_action(history=history, statelog=statelog)
             # 환경에 적용 후 다음 state로 적용
-            next_state, reward, OutputTable = ScheduleTable.step(action=action, state=state, table=OutputTable)
+            statelog, reward, OutputTable = ScheduleTable.step(action=action, state=statelog, table=OutputTable)
             OutputTable.iloc[index, 2] = step.Type
-            next_state = np.reshape([next_state], (1, Params.MachinesNumber(), len(State_name), 1))
+            next_state = ScheduleTable.getStateImage((168, 168))
+            next_state = np.reshape([next_state], (1, 168, 168, 1))
             next_history = np.append(next_state, history[:, :, :, :3], axis=3)
 
-            #agent.avg_q_max += np.amax(agent.model.predict(np.float32(history / history.max(axis=0)))[0])
-            agent.avg_q_max += np.amax(agent.model.predict(np.float32(history / history.max(axis=1)))[0])
+            #agent.avg_q_max += np.amax(agent.model.predict(np.float32(history / history.max(axis=1)))[0])
+            agent.avg_q_max += np.amax(agent.model.predict(np.float32(history / 255.))[0])
             agent.append_sample(history, action, reward, next_history)
 
             if len(agent.memory) >= agent.train_start:
@@ -102,8 +107,8 @@ def main():
                      agent.avg_q_max / float(index), len(agent.memory)))
         agent.avg_q_max, agent.avg_loss = 0, 0
         agent.model.save_weights("./save_model/breakout_dqn_1.h5")
-        OutputTable.to_csv('./ScheduleTables/ScheduleTable' + str(epi + 1) + '(' +
-                           str(ScheduleTable.score) + ').csv', index=False)
+        OutputTable.to_csv('./DataDigestTables/ScheduleTable' + str(epi + 1) + '(' +
+                           str(math.ceil(ScheduleTable.score)) + ').csv', index=False)
         start_time = time.time()
 
 if __name__ == '__main__':
