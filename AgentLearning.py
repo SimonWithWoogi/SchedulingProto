@@ -38,7 +38,7 @@ def main():
                   'Demand DueDate', 'Demand Type', 'SetUp Warning', 'Violation Time', 'Machine Id']
     ScheduleTable = Env()
     agent = Agent(action_size=Params.MachinesNumber(),
-                  state_size=(168, 168, TIME_BOUNDARY))
+                  state_size=(84, 84, TIME_BOUNDARY))
                   #state_size=(Params.MachinesNumber(), len(State_name), TIME_BOUNDARY))
 
     start_time = time.time()
@@ -55,9 +55,9 @@ def main():
         OutputTable = pd.DataFrame(columns=['Demand Id', 'Machine Id', 'Type',
                                             'Processing Time', 'Start Time', 'Complete Time',
                                             'Due date', 'Set-Up', 'Violation Time'])
-        state = ScheduleTable.getStateImage((168, 168))
+        state = ScheduleTable.getStateImage((84, 84))
         history = np.stack((state, state, state, state), axis=2)
-        history = np.reshape([history], (1, 168, 168, 4))
+        history = np.reshape([history], (1, 84, 84, 4))
         statelog = pre_processing(np.zeros((Params.MachinesNumber(), len(State_name))))
         #history = np.stack((state, state, state, state), axis=2)
         #history = np.reshape([history],
@@ -85,8 +85,8 @@ def main():
             # 환경에 적용 후 다음 state로 적용
             statelog, reward, OutputTable = ScheduleTable.step(action=action, state=statelog, table=OutputTable)
             OutputTable.iloc[index, 2] = step.Type
-            next_state = ScheduleTable.getStateImage((168, 168))
-            next_state = np.reshape([next_state], (1, 168, 168, 1))
+            next_state = ScheduleTable.getStateImage((84, 84))
+            next_state = np.reshape([next_state], (1, 84, 84, 1))
             next_history = np.append(next_state, history[:, :, :, :3], axis=3)
 
             #agent.avg_q_max += np.amax(agent.model.predict(np.float32(history / history.max(axis=1)))[0])
