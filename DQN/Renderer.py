@@ -26,6 +26,9 @@ class Draw:
         self.typegap = 255 / self.Params.ProductKinds()
         self.win = tk.Tk()  # 인스턴스 생성
     def ResetBackboard(self):
+        self.win.destroy()
+        self.win = None
+        self.win = tk.Tk()  # 인스턴스 생성
         self.Backboard = np.zeros((self.DemandUnit + self.MachineUnit
                                   * self.Params.MachinesNumber(),
                                   self.WorkUnit * self.Params.LimitationTime()))
@@ -73,15 +76,21 @@ class Draw:
 
         self.Backboard[:, self.oldduedate * self.WorkUnit] = 180
     def render(self):
-        pil_image = Image.fromarray(self.Backboard)
+        pil_image = Image.fromarray(self.Backboard.copy())
         imgtk = ImageTk.PhotoImage(image=pil_image)
         label = tk.Label(self.win, image=imgtk)
         label.pack(side="top")
         self.win.update()
-        label.destroy()
+        pil_image.close()
+        pil_image.__exit__()
+        pil_image.__exit__()
+        imgtk.__del__()
+        label.pack_forget()
         return None
 
     def getBackBoardImage(self, size):
-        pil_image = Image.fromarray(self.Backboard)
-        resize_image = pil_image.resize((168, 168))
+        pil_image = Image.fromarray(self.Backboard.copy())
+        resize_image = pil_image.resize(size)
+        pil_image.close()
+        pil_image.__exit__()
         return np.array(resize_image)
