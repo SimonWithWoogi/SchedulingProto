@@ -22,14 +22,13 @@ class GanttChart:
         pil_image = Image.fromarray(self.BackBoard)
         imgtk = ImageTk.PhotoImage(image=pil_image)
         self.GUIBackBoard = tk.Label(self.win, image=imgtk)
-        self.GUIBackBoard.place(x=0, y=0)
-        self.GUIBackBoard.pack()
         # GanttChart Machines
         self.GUIMachine = []
         for i in range(Number_Of_Machines):
             self.GUIMachine.append(tk.Button(self.win, text='M'+str(i+1)))
             self.GUIMachine[i].grid(row=i, column=0, sticky=tk.N+tk.S)
 
+        self.GUIBackBoard.grid(row=0, column=1, rowspan=Number_Of_Machines, sticky=tk.W)
     def Reset(self):
         self.BackBoard = np.zeros(self.BoardSize)
     def Render(self):
