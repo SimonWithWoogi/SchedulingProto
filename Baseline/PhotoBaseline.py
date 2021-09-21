@@ -2,8 +2,15 @@ import pandas as pd
 from Environment.Renderer import GanttChart
 from Environment import SimulationEngine as Sim
 
+import pickle
+import math
 
-class EMRFEngine:
+def PrintLog(str, Ignore=False):
+    Logmode = True
+    if Logmode | Ignore:
+        print(str)
+
+class EMRFEngine: # Existing Method in Real Fab
     def __init__(self, Env):
         self.Env = Env
         self.Arrival = self.Env.Lots.sort_values(by='Arrival Time', axis=0, ascending=True)
@@ -12,20 +19,24 @@ class EMRFEngine:
         for i in range(self.Env.MachineAttributes.shape[0]):
             self.Machine.append(Sim.Engine())
 
-        self.Renderer = GanttChart((len(self.Machine), self.Env.Lots.shape[0] * 2), len(self.Machine),
-                                   len(self.Env.Stocker))
-        self.Renderer.SetTitle('Photo line GanttChart')
-
+        # self.Renderer = GanttChart((len(self.Machine), self.Env.Lots.shape[0] * 2), len(self.Machine),
+        #                            len(self.Env.Stocker))
+        # self.Renderer.SetTitle('Photo line GanttChart')
+    def StartEnd(self):
+        head = self.Arrival.head(1)
+        start = head['Arrival Time'].tolist()
+        tail = self.Arrival.tail(1)
+        end = tail['Arrival Time'].tolist()
+        return start, end
     def run(self, post=False):
         # Dashboard 출력용
-        # print('===============Dash Board================')
-        # print('Masks in Stocker')
-        # print(self.Env.Stocker)
-        # print('Masks in Machines')
-        # print(self.Env.MachineAttributes['Masks'])
-        # print('========================================')
+        # PrintLog('===============Dash Board================')
+        # PrintLog('Masks in Stocker')
+        # PrintLog(self.Env.Stocker)
+        # PrintLog('Masks in Machines')
+        # PrintLog(self.Env.MachineAttributes['Masks'])
+        # PrintLog('========================================')
         # 초기화
-        nexttime = 0
         self.Departure.sort_values(by='Departure Time', axis=0, ascending=True)
 
         # 동시간 스케줄셋 추출
@@ -33,21 +44,21 @@ class EMRFEngine:
         val = head['Arrival Time'].tolist()
         if post:
             val = self.Departure['Departure Time'].head(1).tolist()
-            print('==================Departure Time:' + str(val) + '====================')
+            PrintLog('==================Departure Time:' + str(val) + '====================')
         else:
-            print('==================Arrival Time:' + str(val) + '====================')
+            PrintLog('==================Arrival Time:' + str(val) + '====================')
         # Departure event
         Deplist = self.Departure[self.Departure['Departure Time'] <= val[0]]
         delidx = self.Departure[self.Departure['Departure Time'] <= val[0]].index
         self.Departure = self.Departure.drop(delidx)
         for timenum in Deplist.iterrows():
             self.Machine[timenum[1]['Number']].Departure(timenum[1]['Departure Time'])
-            print('[Departure Event] Machine:' + str(timenum[1]['Number']))
+            PrintLog('[Departure Event] Machine:' + str(timenum[1]['Number']))
 
         AssignSet = self.Arrival[self.Arrival['Arrival Time'] == val[0]]
         delidx = self.Arrival[self.Arrival['Arrival Time'] == val[0]].index
         self.Arrival = self.Arrival.drop(delidx)
-
+        proctime = val[0]
         # 스케줄셋 우선순위 정렬
         AssignSet = AssignSet.sort_values(by='Priority', axis=0, ascending=True)
         for index, lot in AssignSet.iterrows():
@@ -104,10 +115,12 @@ class EMRFEngine:
                         temp1 = self.Arrival[self.Arrival['Arrival Time'] < time]
                         temp2 = self.Arrival[self.Arrival['Arrival Time'] >= time]
                         self.Arrival = temp1.append(newrow, ignore_index=True).append(temp2, ignore_index=True)
-                    # print('[Assign Failed]' + 'Recipe Type: ' + str(recipe))
+                    # PrintLog('[Assign Failed]' + 'Recipe Type: ' + str(recipe))
 
+        return proctime
     def ArrivalEvent(self, mode, number, recipe, time):
         perform = self.Env.MachineAttributes.loc[number, 'Performance']
+        perform = perform[recipe-1]
         Masklist = self.Env.MachineAttributes['Masks']
         setup = 0
         toS = 0
@@ -142,36 +155,239 @@ class EMRFEngine:
         NewDeparture = {'Departure Time': nexttime, 'Number': number}
         self.Departure = self.Departure.append(NewDeparture, ignore_index=True)
 
-        print('[Arrival Event] Assign Machine:' + str(number) + ', Recipe Type: ' + str(recipe)
-              + ', SetUp: ' + str(setup) + ', Moving Time: ' + str(toS + toM)
-              + ', Departure: ' + str(nexttime))
+        PrintLog('[Arrival Event] Assign Machine:' + str(number) + ', Recipe Type: ' + str(recipe)
+                 + ', SetUp: ' + str(setup) + ', Moving Time: ' + str(toS + toM)
+                 + ', Departure: ' + str(nexttime))
+
+class MTWFEngine: # Minimizing Total Weighted Flowtime
+    def __init__(self, Env):
+        self.Env = Env
+        self.Arrival = self.Env.Lots.sort_values(by='Arrival Time', axis=0, ascending=True)
+        self.Departure = pd.DataFrame(columns=['Departure Time', 'Number'])
+        self.Machine = []
+        for i in range(self.Env.MachineAttributes.shape[0]):
+            self.Machine.append(Sim.Engine())
+
+        # self.Renderer = GanttChart((len(self.Machine), self.Env.Lots.shape[0] * 2), len(self.Machine),
+        #                            len(self.Env.Stocker))
+        # self.Renderer.SetTitle('Photo line GanttChart')
+
+    def StartEnd(self):
+        head = self.Arrival.head(1)
+        start = head['Arrival Time'].tolist()
+        tail = self.Arrival.tail(1)
+        end = tail['Arrival Time'].tolist()
+        return start, end
+
+    def run(self, post=False):
+        # 초기화
+        self.Departure.sort_values(by='Departure Time', axis=0, ascending=True)
+
+        # 동시간 스케줄셋 추출
+        val = 0
+        if post:
+            val = self.Departure['Departure Time'].tail(1).tolist()
+            PrintLog('==================Departure Time:' + str(val) + '====================')
+        # Departure event
+        for timenum in self.Departure.iterrows():
+            self.Machine[timenum[1]['Number']].Departure(timenum[1]['Departure Time'])
+            PrintLog('[Departure Event] Machine:' + str(timenum[1]['Number']))
+        self.Departure = pd.DataFrame(columns=['Departure Time', 'Number'])
+
+
+        # 남은 로트를 처리할 수 있는 Idle한 머신 탐색
+        IdleMachine = []
+        RemainRecipe = self.Arrival['Recipe'].tolist()
+        for i in range(len(self.Machine)):
+            if not self.Machine[i].isBusy():
+                IdleMachine.append(i)
+
+        # Idle한 설비중에 처리할 수 있는 Lot가 없다면 종료
+        if len(IdleMachine) == 0:
+            return
+
+        # Recipe Selection module RPR5(Recipe selection Rule) 적용
+        RPR = [None] * len(self.Machine) # Machine마다 최적의 Recipe 결정
+        for i in IdleMachine:
+            RPR[i] = self.Env.Constraints.loc[i, 'Acceptance Machine']
+            if self.Machine[i].WorkType in self.Env.MachineAttributes.loc[i, 'Masks']:
+                if self.Machine[i].WorkType in RemainRecipe:
+                    RPR[i] = [ self.Machine[i].WorkType ]
+                else:
+                    RPR[i].remove(self.Machine[i].WorkType)
+
+        for i in IdleMachine:
+            minTimeRecipe = [math.inf, 0]
+            for recipe in RPR[i]:
+                # 여러개의 레시피(한 개일수도 있음) 중에서 제일 적은 공정시간을 가지는 경우 RPR[i]를 하나의 스칼라로 추림
+                performance = self.Env.MachineAttributes['Performance']
+                if minTimeRecipe[0] > performance[i][recipe - 1]:
+                    if not self.Arrival[self.Arrival['Recipe'] == recipe].shape[0] == 0:
+                        minTimeRecipe = [performance[i][recipe - 1], recipe]
+
+            # 해당 레시피에서 높은 우선순위의 로트를 추려낸다.
+            if not minTimeRecipe[1] == 0:
+                TargetLots = self.Arrival[self.Arrival['Recipe'] == minTimeRecipe[1]]
+                TargetLots = TargetLots.sort_values(by='Priority', axis=0, ascending=True)
+                AssignLot = TargetLots.head(1)
+                idx = AssignLot.index
+                self.Arrival = self.Arrival.drop(idx)
+
+                # 추려낸 로트를 할당한다.
+                AssignTime = AssignLot['Arrival Time'].item()
+                if self.Machine[i].Tnow > AssignTime:
+                    AssignTime = self.Machine[i].Tnow
+                self.ArrivalEvent(i, minTimeRecipe[1], AssignTime)
+
+        return val
+
+    def ArrivalEvent(self, number, recipe, time):
+        perform = self.Env.MachineAttributes.loc[number, 'Performance']
+        perform = perform[recipe-1]
+        Masklist = self.Env.MachineAttributes['Masks']
+        setup = 0
+        toS = 0
+        toM = 0
+        ToStocker = 0
+
+        # setup 여부
+        if not self.Machine[number].WorkType == recipe:
+            setup = 5
+
+        # Mask 소지 여부
+        if not recipe in Masklist[number]:
+            # Stocker 소지 여부
+            if not self.Env.Stocker[recipe - 1] == 0:
+                self.Env.Stocker[recipe - 1] -= 1
+                temp = self.Env.MachineAttributes.loc[number, 'Masks']
+                ToStocker = temp.pop(0)
+                temp.append(recipe)
+                self.Env.MachineAttributes.loc[number, 'Masks'] = temp
+
+                toS = self.Env.Constraints.loc[number, 'MaskTime from S']
+
+            # Other Machine 소지 여부
+            else:
+                Idle = []
+                Running = []
+                for j in range(len(Masklist)):
+                    if recipe in Masklist[j]:
+                        if not self.Machine[j].isBusy():
+                            Idle.append(j)
+                        else:
+                            Running.append(j)
+                if not len(Idle) == 0:
+                    # Extract mask from other Machine
+                    Masklist[Idle[0]].remove(recipe)
+                    Masklist[Idle[0]].append(0)
+                    # Target Machine pop mask
+                    ToStocker = Masklist[number].pop(0)
+                    Masklist[number].append(recipe)
+                    self.Env.MachineAttributes['Masks'] = Masklist
+
+                    toM = self.Env.Constraints.loc[number, 'MaskTime from M']
+                else:
+                    # 가동중인 다른 머신을 기다렸다가 할당해야하는 경우
+                    if not len(Running) == 0:
+                        test = 2
+                    else:
+                        WhatisThis = 1
+
+        # Store other mask to Stocker
+        if not ToStocker == 0:
+            self.Env.Stocker[ToStocker - 1] += 1
+
+        nexttime = self.Machine[number].Arrival(time,
+                                                [recipe,
+                                                 perform + setup + toS + toM])
+        NewDeparture = {'Departure Time': nexttime, 'Number': number}
+        self.Departure = self.Departure.append(NewDeparture, ignore_index=True)
+
+        PrintLog('[Arrival Event] Assign Machine:' + str(number) + ', Recipe Type: ' + str(recipe)
+                 + ', SetUp: ' + str(setup) + ', Moving Time: ' + str(toS + toM)
+                 + ', Departure: ' + str(nexttime))
 
 
 def main():
-    Photo = Sim.PhotoLine(Number_Of_Machines=20, Number_Of_Kinds=20, LotsVolume=500)
-    Photo.generateDemandSet()
-    EMRF = EMRFEngine(Photo)
+    ParamLots = [300, 500, 1000]
+    ParamMachine = [5, 10, 20]
+    ParamRecipe = [10, 20]
+    Iteration = 10
+    num = 0
+    GenFlag = False
+    if GenFlag:
+        for LotsNum in ParamLots:
+            for MachineNum in ParamMachine:
+                for RecipeNum in ParamRecipe:
+                    for i in range(Iteration):
+                        Photo = Sim.PhotoLine(Number_Of_Machines=MachineNum,
+                                              Number_Of_Kinds=RecipeNum,
+                                              LotsVolume=LotsNum)
+                        Photo.generateDemandSet()
+                        with open('./PhotoData/ReservedEnvironment' + str(num) + '.pickle', 'wb') as f:
+                            pickle.dump(Photo, f)
+                        num += 1
 
+    boundary = len(ParamMachine) * len(ParamMachine) * len(ParamRecipe) * Iteration
+    for i in range(boundary):
+        with open('./PhotoData/ReservedEnvironment' + str(i) + '.pickle', 'rb') as f:
+            Photo = pickle.load(f)
+
+        # MTWF 테스트
+        MTWF = MTWFEngine(Photo)
+        start, end = MTWF.StartEnd()
+        PrintLog(str(i) + 'th Simulation Start[MTWF] [start, end]= [' + str(start) + str(end) + ']', Ignore=True)
+        MTWFRun(MTWF)
+
+        # EMRF 테스트
+        EMRF = EMRFEngine(Photo)
+        start, end = EMRF.StartEnd()
+        PrintLog(str(i) + 'th Simulation Start[EMRF] [start, end]= [' + str(start) + str(end) + ']', Ignore=True)
+        EMRFRun(EMRF)
+
+    return None
+
+def EMRFRun(EMRF):
+    endtime = 0
     while EMRF.Arrival.shape[0] != 0:
         EMRF.run()
 
     while EMRF.Departure.shape[0] != 0:
-        EMRF.run(post=True)
+        endtime = EMRF.run(post=True)
 
+    PrintLog('Simulation End[EMRF] [end time]= [' + str(endtime) + ']', Ignore=True)
     for i in range(len(EMRF.Machine)):
-        print('-----------------Machine[' + str(i) + ']-----------------')
-        print('Acceptance model in Machine')
-        print(EMRF.Env.Constraints.loc[i, 'Acceptance Machine'])
-        print('Performance of Machine')
-        print(EMRF.Env.MachineAttributes.loc[i, 'Performance'])
-        print('Masks in Machines')
-        print(EMRF.Env.MachineAttributes.loc[i, 'Masks'])
-        print('[Summary]')
-        EMRF.Machine[i].Summary()
-        print('---------------------------------------------------------')
+        PrintLog('-----------------Machine[' + str(i) + ']-----------------')
+        PrintLog('Acceptance model in Machine')
+        PrintLog(EMRF.Env.Constraints.loc[i, 'Acceptance Machine'])
+        PrintLog('Performance of Machine')
+        PrintLog(EMRF.Env.MachineAttributes.loc[i, 'Performance'])
+        PrintLog('Masks in Machines')
+        PrintLog(EMRF.Env.MachineAttributes.loc[i, 'Masks'])
+        PrintLog('[Summary]')
+        # EMRF.Machine[i].Summary()
+        PrintLog('---------------------------------------------------------')
 
-    return None
+def MTWFRun(MTWF):
+    endtime = 0
+    while MTWF.Arrival.shape[0] != 0:
+        MTWF.run()
 
+    while MTWF.Departure.shape[0] != 0:
+        endtime = MTWF.run(post=True)
+
+    PrintLog('Simulation End[MTWF] [end time]= [' + str(endtime) + ']', Ignore=True)
+    for i in range(len(MTWF.Machine)):
+        PrintLog('-----------------Machine[' + str(i) + ']-----------------')
+        PrintLog('Acceptance model in Machine')
+        PrintLog(MTWF.Env.Constraints.loc[i, 'Acceptance Machine'])
+        PrintLog('Performance of Machine')
+        PrintLog(MTWF.Env.MachineAttributes.loc[i, 'Performance'])
+        PrintLog('Masks in Machines')
+        PrintLog(MTWF.Env.MachineAttributes.loc[i, 'Masks'])
+        PrintLog('[Summary]')
+        # MTWF.Machine[i].Summary()
+        PrintLog('---------------------------------------------------------')
 
 if __name__ == '__main__':
     main()

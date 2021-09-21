@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from collections import deque
-
+import math
 
 class PhotoLine:
     # 포토설비 대수, 공정조건 개수, 스케줄할 로트 수
@@ -28,39 +28,39 @@ class PhotoLine:
         if LotsVolume is not None:
             self.__V = LotsVolume
 
+        # Constraints Setting
+        Acceptance_Machine = self.__SetMachineAcceptance()
+        MasktimeM = self.__SetMovingTime(10, 40 + 1)
+        MasktimeS = self.__SetMovingTime(5, 20 + 1)
+
+        npstack = np.vstack((Acceptance_Machine, MasktimeM, MasktimeS))
+        nptr = np.transpose(npstack)
+        self.Constraints[:][:] = nptr
+
         # Machine Attribute Setting
-        Performance = self.__SetMachinePerformance(20, 40+1)
+        Performance, RecipeMinTime = self.__SetMachinePerformance(20, 40+1, Acceptance_Machine)
         MachineMaskCapa = self.__UniformRandomInt(2, 3+1, self.__M)
         MachineHasMasks = []
         for i in range(self.__M):
             MachineHasMasks.append([])
             for j in range(MachineMaskCapa[i]):
                 MachineHasMasks[i].append(0)
-        MachineHasMasks = np.array(MachineHasMasks)
-        npstack = np.vstack((Performance, MachineHasMasks, MachineMaskCapa))
-        nptr = np.transpose(npstack)
-        self.MachineAttributes[:][:] = nptr
+        MachineMaskCapa = MachineMaskCapa.tolist()
+        temp = Performance + MachineHasMasks + MachineMaskCapa
+        self.MachineAttributes[:]['Performance'] = Performance
+        self.MachineAttributes[:]['Masks'] = MachineHasMasks
+        self.MachineAttributes[:]['MaskCapa'] = MachineMaskCapa
 
         self.Stocker = self.__UniformRandomInt(1, 2+1, self.__P)
 
-
         # Demand Setting
         Recipe = self.__SetRecipeIntoLot()
-        ArrivalTime = self.__SetArrivalTime(Performance)
+        ArrivalTime = self.__SetArrivalTime(Recipe, RecipeMinTime)
         Priority = self.__SetLotPriority(1, 10+1)
 
         npstack = np.vstack((Recipe, ArrivalTime, Priority))
         nptr = np.transpose(npstack)
         self.Lots[:][:] = nptr
-
-        # Constraints Setting
-        Acceptance_Machine = self.__SetMachineAcceptance()
-        MasktimeM = self.__SetMovingTime(10, 40+1)
-        MasktimeS = self.__SetMovingTime(5, 20+1)
-
-        npstack = np.vstack((Acceptance_Machine, MasktimeM, MasktimeS))
-        nptr = np.transpose(npstack)
-        self.Constraints[:][:] = nptr
 
     def __UniformRandomInt(self, LSL, USL, size):
         distribution = 'uniform'
@@ -71,37 +71,47 @@ class PhotoLine:
         value = value.astype(np.int32)
         return value
     # 공정시간 설정
-    def __SetMachinePerformance(self, LSL, USL):
+    def __SetMachinePerformance(self, LSL, USL, Acceptance):
         MachinePerformance = []
+        RecipeMinTime = [math.inf] * self.__P
         distribution = 'uniform'
         for i in range(self.__M):
-            value = getRandomValue(distribution=distribution,
-                                   param='low=' + str(LSL) + ',' +
-                                         'high=' + str(USL),
-                                   size=1)
-            value = value.astype(np.int32)
-            MachinePerformance.append(value.item(0))
-        return np.array(MachinePerformance)
+            MachinePerformance.append([])
+            for j in range(1, self.__P + 1):
+                value = math.inf
+                if j in Acceptance[i]:
+                    value = getRandomValue(distribution=distribution,
+                                           param='low=' + str(LSL) + ',' +
+                                                 'high=' + str(USL),
+                                           size=1)
+                    value = np.asscalar(value.astype(np.int32))
+                    if RecipeMinTime[j-1] > value:
+                        RecipeMinTime[j-1] = value
+                MachinePerformance[i].append(value)
+        return MachinePerformance, RecipeMinTime
     # 공정조건 설정(recipe or model type)
     def __SetRecipeIntoLot(self):
         distribution = 'uniform'
         Recipe = getRandomValue(distribution=distribution,
                                 param='low=' + str(1) + ',' +
-                                      'high=' + str(self.__P),
+                                      'high=' + str(self.__P + 1),
                                 size=self.__V)
         return Recipe.astype(np.int32)
 
     # 각 로트의 도착시간
-    def __SetArrivalTime(self, Performance):
+    def __SetArrivalTime(self, Recipe, RecipeMinTime):
         distribution = 'uniform'
-        MinTime = Performance.tolist().copy()
-        MinTime.sort()
-        USL = (MinTime[0] * self.__V) / self.__M
-        ArrivalTime = getRandomValue(distribution=distribution,
-                                     param='low=' + str(0) + ',' +
-                                           'high=' + str(USL),
-                                     size=self.__V)
-        return ArrivalTime.astype(np.int32)
+        ArrivalTime = []
+        for model in Recipe:
+            time = RecipeMinTime[model-1]
+            USL = (time * self.__V) / self.__M
+            value = getRandomValue(distribution=distribution,
+                                   param='low=' + str(0) + ',' +
+                                         'high=' + str(USL),
+                                   size=1)
+            value = np.asscalar(value.astype(np.int32))
+            ArrivalTime.append(value)
+        return np.array(ArrivalTime)
 
     # 각 로트의 중요도
     def __SetLotPriority(self, LSL, USL):
@@ -122,7 +132,7 @@ class PhotoLine:
         for i in range(1, self.__P + 1):
             Many = getRandomValue(distribution='uniform',
                                   param='low=' + str(1) + ',' +
-                                        'high=' + str(self.__M),
+                                        'high=' + str(self.__M + 1),
                                   size=1)
             Many = Many.astype(np.int32)
             Acceptance = np.random.choice(range(0, self.__M), Many.item(0), replace=False)
@@ -145,6 +155,7 @@ class Engine:
     def __init__(self):
         self.Q = deque()
         self.Tnow = 0
+        self.NextDeparture = 0
         self.WorkType = -1
         self.TotalProduction = 0
         self.AverageWaitingTime = 0
@@ -158,7 +169,6 @@ class Engine:
         self.__AreaUnderQt = 0
         self.__QTime = deque()
         self.__TotalWaitingTime = 0
-        self.__NextDeparture = 0
         self.__WorkType = 0
         self.__TotalSystemTime = 0
 
@@ -183,10 +193,10 @@ class Engine:
             state = self.Q.pop()
             self.WorkType = state[0]
             ServiceTime = state[1]
-            self.__NextDeparture = self.Tnow + ServiceTime
+            self.NextDeparture = self.Tnow + ServiceTime
             self.Utilization += ServiceTime
             self.__TotalSystemTime += (WaitingTime + ServiceTime)
-        return self.__NextDeparture
+        return self.NextDeparture
 
     def Departure(self, time):
         self.__AreaUnderQt += len(self.Q) * (time - self.Tnow)
