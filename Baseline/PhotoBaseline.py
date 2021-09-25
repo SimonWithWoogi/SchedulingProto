@@ -6,7 +6,9 @@ import pickle
 import math
 
 def PrintLog(str, Ignore=False):
-    Logmode = True
+    Logmode = False
+    #Logmode = False
+
     if Logmode | Ignore:
         print(str)
 
@@ -19,6 +21,7 @@ class EMRFEngine: # Existing Method in Real Fab
         for i in range(self.Env.MachineAttributes.shape[0]):
             self.Machine.append(Sim.Engine())
 
+        self.ObjectValue = 0
         # self.Renderer = GanttChart((len(self.Machine), self.Env.Lots.shape[0] * 2), len(self.Machine),
         #                            len(self.Env.Stocker))
         # self.Renderer.SetTitle('Photo line GanttChart')
@@ -78,18 +81,18 @@ class EMRFEngine: # Existing Method in Real Fab
                         if recipe in self.Env.MachineAttributes.loc[number, 'Masks']:
                             # 전 공정조건과 현 공정조건이 동일한 설비 정의
                             if self.Machine[number].WorkType == recipe:
-                                self.ArrivalEvent('Normal', number, recipe, time)
+                                self.ArrivalEvent('Normal', number, recipe, time, priority)
                                 break
                             # 다른 모델을 처리했으나, 마스크를 가지고 있으면 Step 4-2
                             else:
-                                self.ArrivalEvent('Setting', number, recipe, time)
+                                self.ArrivalEvent('Setting', number, recipe, time, priority)
                                 break
                         else:
                             # 마스크는 안가지고 있는데, 보관소에 그 마스크가 있으면 Step 4-3
                             if not self.Env.Stocker[recipe - 1] == 0:
                                 # Extract mask from Stocker
                                 self.Env.Stocker[recipe - 1] -= 1
-                                self.ArrivalEvent('Stocker', number, recipe, time)
+                                self.ArrivalEvent('Stocker', number, recipe, time, priority)
                                 break
                             else:
                                 # 마스크가 타설비에 쓰고있는데, 타설비가 쉬고있으면 Step 4-4
@@ -100,7 +103,7 @@ class EMRFEngine: # Existing Method in Real Fab
                                             # Extract mask from other Machine
                                             Masklist[m].remove(recipe)
                                             Masklist[m].append(0)
-                                            self.ArrivalEvent('Machine', number, recipe, time)
+                                            self.ArrivalEvent('Machine', number, recipe, time, priority)
                                             break
                 number += 1
                 if number == len(self.Machine):
@@ -118,7 +121,7 @@ class EMRFEngine: # Existing Method in Real Fab
                     # PrintLog('[Assign Failed]' + 'Recipe Type: ' + str(recipe))
 
         return proctime
-    def ArrivalEvent(self, mode, number, recipe, time):
+    def ArrivalEvent(self, mode, number, recipe, time, priority):
         perform = self.Env.MachineAttributes.loc[number, 'Performance']
         perform = perform[recipe-1]
         Masklist = self.Env.MachineAttributes['Masks']
@@ -155,6 +158,8 @@ class EMRFEngine: # Existing Method in Real Fab
         NewDeparture = {'Departure Time': nexttime, 'Number': number}
         self.Departure = self.Departure.append(NewDeparture, ignore_index=True)
 
+        self.ObjectValue += (priority * (perform + setup + toS + toM))
+
         PrintLog('[Arrival Event] Assign Machine:' + str(number) + ', Recipe Type: ' + str(recipe)
                  + ', SetUp: ' + str(setup) + ', Moving Time: ' + str(toS + toM)
                  + ', Departure: ' + str(nexttime))
@@ -168,6 +173,7 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
         for i in range(self.Env.MachineAttributes.shape[0]):
             self.Machine.append(Sim.Engine())
 
+        self.ObjectValue = 0
         # self.Renderer = GanttChart((len(self.Machine), self.Env.Lots.shape[0] * 2), len(self.Machine),
         #                            len(self.Env.Stocker))
         # self.Renderer.SetTitle('Photo line GanttChart')
@@ -181,35 +187,45 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
 
     def run(self, post=False):
         # 초기화
-        self.Departure.sort_values(by='Departure Time', axis=0, ascending=True)
+        self.Departure = self.Departure.sort_values(by='Departure Time', axis=0, ascending=True)
 
         # 동시간 스케줄셋 추출
-        val = 0
+        head = self.Arrival.head(1)
+        val = head['Arrival Time'].tolist()
         if post:
-            val = self.Departure['Departure Time'].tail(1).tolist()
+            val = self.Departure['Departure Time'].head(1).tolist()
             PrintLog('==================Departure Time:' + str(val) + '====================')
+        else:
+            PrintLog('==================Arrival Time:' + str(val) + '====================')
+
         # Departure event
-        for timenum in self.Departure.iterrows():
+        Deplist = self.Departure[self.Departure['Departure Time'] <= val[0]]
+        delidx = self.Departure[self.Departure['Departure Time'] <= val[0]].index
+        self.Departure = self.Departure.drop(delidx)
+        for timenum in Deplist.iterrows():
             self.Machine[timenum[1]['Number']].Departure(timenum[1]['Departure Time'])
             PrintLog('[Departure Event] Machine:' + str(timenum[1]['Number']))
-        self.Departure = pd.DataFrame(columns=['Departure Time', 'Number'])
 
+        # Assign Work
+        AssignSet = self.Arrival[self.Arrival['Arrival Time'] == val[0]]
+        delidx = self.Arrival[self.Arrival['Arrival Time'] == val[0]].index
+        self.Arrival = self.Arrival.drop(delidx)
+        proctime = val[0]
+        # 스케줄셋 우선순위 정렬
+        AssignSet = AssignSet.sort_values(by='Priority', axis=0, ascending=True)
 
         # 남은 로트를 처리할 수 있는 Idle한 머신 탐색
-        IdleMachine = []
-        RemainRecipe = self.Arrival['Recipe'].tolist()
-        for i in range(len(self.Machine)):
-            if not self.Machine[i].isBusy():
-                IdleMachine.append(i)
-
+        IdleMachine, RemainRecipe = self.__GetIdleMachine(AssignSet=AssignSet)
         # Idle한 설비중에 처리할 수 있는 Lot가 없다면 종료
         if len(IdleMachine) == 0:
-            return
+            # 현재 스케줄셋을 가장 빠른 다음으로 미룬다.
+            self.__ShiftSchedule(AssignSet, proctime)
+            return proctime
 
         # Recipe Selection module RPR5(Recipe selection Rule) 적용
         RPR = [None] * len(self.Machine) # Machine마다 최적의 Recipe 결정
         for i in IdleMachine:
-            RPR[i] = self.Env.Constraints.loc[i, 'Acceptance Machine']
+            RPR[i] = self.Env.Constraints.loc[i, 'Acceptance Machine'].copy()
             if self.Machine[i].WorkType in self.Env.MachineAttributes.loc[i, 'Masks']:
                 if self.Machine[i].WorkType in RemainRecipe:
                     RPR[i] = [ self.Machine[i].WorkType ]
@@ -222,26 +238,29 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
                 # 여러개의 레시피(한 개일수도 있음) 중에서 제일 적은 공정시간을 가지는 경우 RPR[i]를 하나의 스칼라로 추림
                 performance = self.Env.MachineAttributes['Performance']
                 if minTimeRecipe[0] > performance[i][recipe - 1]:
-                    if not self.Arrival[self.Arrival['Recipe'] == recipe].shape[0] == 0:
+                    if not AssignSet[AssignSet['Recipe'] == recipe].shape[0] == 0:
                         minTimeRecipe = [performance[i][recipe - 1], recipe]
 
             # 해당 레시피에서 높은 우선순위의 로트를 추려낸다.
             if not minTimeRecipe[1] == 0:
-                TargetLots = self.Arrival[self.Arrival['Recipe'] == minTimeRecipe[1]]
+                TargetLots = AssignSet[AssignSet['Recipe'] == minTimeRecipe[1]]
                 TargetLots = TargetLots.sort_values(by='Priority', axis=0, ascending=True)
                 AssignLot = TargetLots.head(1)
                 idx = AssignLot.index
-                self.Arrival = self.Arrival.drop(idx)
+                AssignSet = AssignSet.drop(idx)
 
                 # 추려낸 로트를 할당한다.
                 AssignTime = AssignLot['Arrival Time'].item()
                 if self.Machine[i].Tnow > AssignTime:
                     AssignTime = self.Machine[i].Tnow
-                self.ArrivalEvent(i, minTimeRecipe[1], AssignTime)
+                self.__ArrivalEvent(i, minTimeRecipe[1], AssignTime, AssignLot['Priority'])
 
-        return val
+        if not AssignSet.shape[0] == 0:
+            # 현재 스케줄셋을 가장 빠른 다음으로 미룬다.
+            self.__ShiftSchedule(AssignSet, proctime)
+        return proctime
 
-    def ArrivalEvent(self, number, recipe, time):
+    def __ArrivalEvent(self, number, recipe, time, priority):
         perform = self.Env.MachineAttributes.loc[number, 'Performance']
         perform = perform[recipe-1]
         Masklist = self.Env.MachineAttributes['Masks']
@@ -289,7 +308,24 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
                 else:
                     # 가동중인 다른 머신을 기다렸다가 할당해야하는 경우
                     if not len(Running) == 0:
-                        test = 2
+                        # Extract mask from other Machine
+                        Masklist[Running[0]].remove(recipe)
+                        Masklist[Running[0]].append(0)
+                        # Target Machine pop mask
+                        ToStocker = Masklist[number].pop(0)
+                        Masklist[number].append(recipe)
+                        self.Env.MachineAttributes['Masks'] = Masklist
+
+                        toM = self.Env.Constraints.loc[number, 'MaskTime from M']
+
+                        targetmachine = self.Departure[self.Departure['Number'] == Running[0]]
+                        if targetmachine.shape[0] == 0:
+                            Bug = True
+                        if targetmachine.shape[0] > 1:
+                            Bug = True
+                        completetime = targetmachine['Departure Time']
+
+                        toM = toM + (completetime.item() - time)
                     else:
                         WhatisThis = 1
 
@@ -303,10 +339,91 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
         NewDeparture = {'Departure Time': nexttime, 'Number': number}
         self.Departure = self.Departure.append(NewDeparture, ignore_index=True)
 
+        self.ObjectValue += (priority.item() * (perform + setup + toS + toM))
+
         PrintLog('[Arrival Event] Assign Machine:' + str(number) + ', Recipe Type: ' + str(recipe)
                  + ', SetUp: ' + str(setup) + ', Moving Time: ' + str(toS + toM)
                  + ', Departure: ' + str(nexttime))
 
+    def __GetIdleMachine(self, AssignSet):
+        IdleMachine = []
+        RemainRecipe = AssignSet['Recipe'].tolist()
+        for i in range(len(self.Machine)):
+            if not self.Machine[i].isBusy():
+                acceptance = self.Env.Constraints.loc[i, 'Acceptance Machine']
+                for model in acceptance:
+                    if model in RemainRecipe:
+                        IdleMachine.append(i)
+                        break
+        return IdleMachine, RemainRecipe
+
+    def __ShiftSchedule(self, batch, time):
+        dep = 0
+        time = time + 1
+        if not self.Departure.shape[0] == 0:
+            self.Departure = self.Departure.sort_values(by='Departure Time', axis=0, ascending=True)
+            val = self.Departure['Departure Time'].head(1).tolist()
+            dep = val[0]
+            time = dep
+        if not self.Arrival.shape[0] == 0:
+            val = self.Arrival['Arrival Time'].head(1).tolist()
+            arr = val[0]
+            if arr <= dep:
+                time = arr
+
+        for _, term in batch.iterrows():
+            term['Arrival Time'] = time
+            temp1 = self.Arrival[self.Arrival['Arrival Time'] < time]
+            temp2 = self.Arrival[self.Arrival['Arrival Time'] >= time]
+            self.Arrival = temp1.append(term, ignore_index=True).append(temp2, ignore_index=True)
+
+def EMRFRun(EMRF):
+    endtime = 0
+    while EMRF.Arrival.shape[0] != 0:
+        EMRF.run()
+
+    while EMRF.Departure.shape[0] != 0:
+        endtime = EMRF.run(post=True)
+
+    PrintLog('Simulation End[EMRF] [end time, object value]= ['
+             + str(endtime) + ', ' + str(EMRF.ObjectValue) + ']', Ignore=True)
+    for i in range(len(EMRF.Machine)):
+        PrintLog('-----------------Machine[' + str(i) + ']-----------------')
+        PrintLog('Acceptance model in Machine')
+        PrintLog(EMRF.Env.Constraints.loc[i, 'Acceptance Machine'])
+        PrintLog('Performance of Machine')
+        PrintLog(EMRF.Env.MachineAttributes.loc[i, 'Performance'])
+        PrintLog('Masks in Machines')
+        PrintLog(EMRF.Env.MachineAttributes.loc[i, 'Masks'])
+        PrintLog('[Summary]')
+        # EMRF.Machine[i].Summary()
+        PrintLog('---------------------------------------------------------')
+
+    return endtime, EMRF.ObjectValue
+
+def MTWFRun(MTWF):
+    endtime = 0
+    while MTWF.Arrival.shape[0] != 0:
+        MTWF.run()
+
+    while MTWF.Departure.shape[0] != 0:
+        endtime = MTWF.run(post=True)
+
+    PrintLog('Simulation End[MTWF] [end time, object value]= ['
+             + str(endtime) + ', ' + str(MTWF.ObjectValue) + ']', Ignore=True)
+    for i in range(len(MTWF.Machine)):
+        PrintLog('-----------------Machine[' + str(i) + ']-----------------')
+        PrintLog('Acceptance model in Machine')
+        PrintLog(MTWF.Env.Constraints.loc[i, 'Acceptance Machine'])
+        PrintLog('Performance of Machine')
+        PrintLog(MTWF.Env.MachineAttributes.loc[i, 'Performance'])
+        PrintLog('Masks in Machines')
+        PrintLog(MTWF.Env.MachineAttributes.loc[i, 'Masks'])
+        PrintLog('[Summary]')
+        # MTWF.Machine[i].Summary()
+        PrintLog('---------------------------------------------------------')
+
+    return endtime, MTWF.ObjectValue
 
 def main():
     ParamLots = [300, 500, 1000]
@@ -329,65 +446,35 @@ def main():
                         num += 1
 
     boundary = len(ParamMachine) * len(ParamMachine) * len(ParamRecipe) * Iteration
+    ResultData = pd.DataFrame(index=range(0, boundary),
+                              columns=['Number', 'Schedule Time',
+                                       'EMRF Finish', 'MTWF Finish', 'EMRF Object Value', 'MTWF Object Value'])
     for i in range(boundary):
+        ResultData.at[i, 'Number'] = i + 1
         with open('./PhotoData/ReservedEnvironment' + str(i) + '.pickle', 'rb') as f:
             Photo = pickle.load(f)
+
+        # EMRF 테스트
+        EMRF = EMRFEngine(Photo)
+        start, end = EMRF.StartEnd()
+        ResultData.at[i, 'Schedule Time'] = end
+        PrintLog(str(i) + 'th Simulation Start[EMRF] [start, end]= [' + str(start) + str(end) + ']', Ignore=True)
+        finish, value = EMRFRun(EMRF)
+
+        ResultData.at[i, 'EMRF Finish'] = finish
+        ResultData.at[i, 'EMRF Object Value'] = value
 
         # MTWF 테스트
         MTWF = MTWFEngine(Photo)
         start, end = MTWF.StartEnd()
         PrintLog(str(i) + 'th Simulation Start[MTWF] [start, end]= [' + str(start) + str(end) + ']', Ignore=True)
-        MTWFRun(MTWF)
+        finish, value = MTWFRun(MTWF)
 
-        # EMRF 테스트
-        EMRF = EMRFEngine(Photo)
-        start, end = EMRF.StartEnd()
-        PrintLog(str(i) + 'th Simulation Start[EMRF] [start, end]= [' + str(start) + str(end) + ']', Ignore=True)
-        EMRFRun(EMRF)
+        ResultData.at[i, 'MTWF Finish'] = finish
+        ResultData.at[i, 'MTWF Object Value'] = value
 
+    ResultData.to_csv('./ResultData.csv')
     return None
-
-def EMRFRun(EMRF):
-    endtime = 0
-    while EMRF.Arrival.shape[0] != 0:
-        EMRF.run()
-
-    while EMRF.Departure.shape[0] != 0:
-        endtime = EMRF.run(post=True)
-
-    PrintLog('Simulation End[EMRF] [end time]= [' + str(endtime) + ']', Ignore=True)
-    for i in range(len(EMRF.Machine)):
-        PrintLog('-----------------Machine[' + str(i) + ']-----------------')
-        PrintLog('Acceptance model in Machine')
-        PrintLog(EMRF.Env.Constraints.loc[i, 'Acceptance Machine'])
-        PrintLog('Performance of Machine')
-        PrintLog(EMRF.Env.MachineAttributes.loc[i, 'Performance'])
-        PrintLog('Masks in Machines')
-        PrintLog(EMRF.Env.MachineAttributes.loc[i, 'Masks'])
-        PrintLog('[Summary]')
-        # EMRF.Machine[i].Summary()
-        PrintLog('---------------------------------------------------------')
-
-def MTWFRun(MTWF):
-    endtime = 0
-    while MTWF.Arrival.shape[0] != 0:
-        MTWF.run()
-
-    while MTWF.Departure.shape[0] != 0:
-        endtime = MTWF.run(post=True)
-
-    PrintLog('Simulation End[MTWF] [end time]= [' + str(endtime) + ']', Ignore=True)
-    for i in range(len(MTWF.Machine)):
-        PrintLog('-----------------Machine[' + str(i) + ']-----------------')
-        PrintLog('Acceptance model in Machine')
-        PrintLog(MTWF.Env.Constraints.loc[i, 'Acceptance Machine'])
-        PrintLog('Performance of Machine')
-        PrintLog(MTWF.Env.MachineAttributes.loc[i, 'Performance'])
-        PrintLog('Masks in Machines')
-        PrintLog(MTWF.Env.MachineAttributes.loc[i, 'Masks'])
-        PrintLog('[Summary]')
-        # MTWF.Machine[i].Summary()
-        PrintLog('---------------------------------------------------------')
 
 if __name__ == '__main__':
     main()
