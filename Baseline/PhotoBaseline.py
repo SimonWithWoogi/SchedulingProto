@@ -1,13 +1,13 @@
 import pandas as pd
-from Environment.Renderer import GanttChart
 from Environment import SimulationEngine as Sim
 
+import copy
 import pickle
 import math
 
 def PrintLog(str, Ignore=False):
+    # Logmode = True
     Logmode = False
-    #Logmode = False
 
     if Logmode | Ignore:
         print(str)
@@ -17,6 +17,12 @@ class EMRFEngine: # Existing Method in Real Fab
         self.Env = Env
         self.Arrival = self.Env.Lots.sort_values(by='Arrival Time', axis=0, ascending=True)
         self.Departure = pd.DataFrame(columns=['Departure Time', 'Number'])
+        self.File = pd.DataFrame(index=range(self.Env.Lots.shape[0]),
+                                 columns=['Lot Index', 'Recipe', 'Arrival Time', 'Priority',
+                                          'Machine Id', 'Start Time', 'Complete Time', 'Last Type', 'Mask Storage',
+                                          'Performance', 'Stocker', 'Reward', 'Event'])
+        self.pivot = 0
+
         self.Machine = []
         for i in range(self.Env.MachineAttributes.shape[0]):
             self.Machine.append(Sim.Engine())
@@ -160,6 +166,21 @@ class EMRFEngine: # Existing Method in Real Fab
 
         self.ObjectValue += (priority * (perform + setup + toS + toM))
 
+        self.File.at[self.pivot, 'Recipe'] = recipe
+        self.File.at[self.pivot, 'Arrival Time'] = time
+        self.File.at[self.pivot, 'Priority'] = priority
+
+        self.File.at[self.pivot, 'Machine Id'] = number + 1
+        self.File.at[self.pivot, 'Start Time'] = setup + toS + toM + time
+        self.File.at[self.pivot, 'Complete Time'] = time + perform
+        self.File.at[self.pivot, 'Last Type'] = 'Not provided'
+        self.File.at[self.pivot, 'Mask Storage'] = self.Env.MachineAttributes.loc[number, 'Masks'].copy()
+        self.File.at[self.pivot, 'Performance'] = perform
+        self.File.at[self.pivot, 'Stocker'] = self.Env.Stocker.copy()
+        self.File.at[self.pivot, 'Reward'] = 'Not provided'
+        self.File.at[self.pivot, 'Event'] = mode
+        self.pivot += 1
+
         PrintLog('[Arrival Event] Assign Machine:' + str(number) + ', Recipe Type: ' + str(recipe)
                  + ', SetUp: ' + str(setup) + ', Moving Time: ' + str(toS + toM)
                  + ', Departure: ' + str(nexttime))
@@ -169,6 +190,12 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
         self.Env = Env
         self.Arrival = self.Env.Lots.sort_values(by='Arrival Time', axis=0, ascending=True)
         self.Departure = pd.DataFrame(columns=['Departure Time', 'Number'])
+        self.File = pd.DataFrame(index=range(self.Env.Lots.shape[0]),
+                                 columns=['Lot Index', 'Recipe', 'Arrival Time', 'Priority',
+                                          'Machine Id', 'Start Time', 'Complete Time', 'Last Type', 'Mask Storage',
+                                          'Performance', 'Stocker', 'Reward', 'Event'])
+        self.pivot = 0
+
         self.Machine = []
         for i in range(self.Env.MachineAttributes.shape[0]):
             self.Machine.append(Sim.Engine())
@@ -268,10 +295,11 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
         toS = 0
         toM = 0
         ToStocker = 0
-
+        event = ''
         # setup 여부
-        if not self.Machine[number].WorkType == recipe:
+        if self.Machine[number].WorkType != recipe and self.Machine[number].WorkType != -1:
             setup = 5
+            event = 'Setting/'
 
         # Mask 소지 여부
         if not recipe in Masklist[number]:
@@ -284,7 +312,7 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
                 self.Env.MachineAttributes.loc[number, 'Masks'] = temp
 
                 toS = self.Env.Constraints.loc[number, 'MaskTime from S']
-
+                event += 'Stocker pop'
             # Other Machine 소지 여부
             else:
                 Idle = []
@@ -305,6 +333,7 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
                     self.Env.MachineAttributes['Masks'] = Masklist
 
                     toM = self.Env.Constraints.loc[number, 'MaskTime from M']
+                    event += 'Other machine' + str(Idle[0]) + ' pop'
                 else:
                     # 가동중인 다른 머신을 기다렸다가 할당해야하는 경우
                     if not len(Running) == 0:
@@ -326,6 +355,7 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
                         completetime = targetmachine['Departure Time']
 
                         toM = toM + (completetime.item() - time)
+                        event += 'Other Running machine' + str(Running[0]) + ' pop'
                     else:
                         WhatisThis = 1
 
@@ -340,6 +370,21 @@ class MTWFEngine: # Minimizing Total Weighted Flowtime
         self.Departure = self.Departure.append(NewDeparture, ignore_index=True)
 
         self.ObjectValue += (priority.item() * (perform + setup + toS + toM))
+
+        self.File.at[self.pivot, 'Recipe'] = recipe
+        self.File.at[self.pivot, 'Arrival Time'] = time
+        self.File.at[self.pivot, 'Priority'] = priority.item()
+
+        self.File.at[self.pivot, 'Machine Id'] = number + 1
+        self.File.at[self.pivot, 'Start Time'] = setup + toS + toM + time
+        self.File.at[self.pivot, 'Complete Time'] = time + perform
+        self.File.at[self.pivot, 'Last Type'] = 'Not provided'
+        self.File.at[self.pivot, 'Mask Storage'] = self.Env.MachineAttributes.loc[number, 'Masks'].copy()
+        self.File.at[self.pivot, 'Performance'] = perform
+        self.File.at[self.pivot, 'Stocker'] = self.Env.Stocker.copy()
+        self.File.at[self.pivot, 'Reward'] = 'Not provided'
+        self.File.at[self.pivot, 'Event'] = event
+        self.pivot += 1
 
         PrintLog('[Arrival Event] Assign Machine:' + str(number) + ', Recipe Type: ' + str(recipe)
                  + ', SetUp: ' + str(setup) + ', Moving Time: ' + str(toS + toM)
@@ -426,12 +471,15 @@ def MTWFRun(MTWF):
     return endtime, MTWF.ObjectValue
 
 def main():
-    ParamLots = [300, 500, 1000]
-    ParamMachine = [5, 10, 20]
-    ParamRecipe = [10, 20]
-    Iteration = 10
+    # ParamLots = [300, 500, 1000]
+    # ParamMachine = [5, 10, 20]
+    # ParamRecipe = [10, 20]
+    ParamLots = [300]
+    ParamMachine = [10]
+    ParamRecipe = [20]
+    Iteration = 30
     num = 0
-    GenFlag = False
+    GenFlag = True
     if GenFlag:
         for LotsNum in ParamLots:
             for MachineNum in ParamMachine:
@@ -455,7 +503,7 @@ def main():
             Photo = pickle.load(f)
 
         # EMRF 테스트
-        EMRF = EMRFEngine(Photo)
+        EMRF = EMRFEngine(copy.deepcopy(Photo))
         start, end = EMRF.StartEnd()
         ResultData.at[i, 'Schedule Time'] = end
         PrintLog(str(i) + 'th Simulation Start[EMRF] [start, end]= [' + str(start) + str(end) + ']', Ignore=True)
@@ -464,8 +512,10 @@ def main():
         ResultData.at[i, 'EMRF Finish'] = finish
         ResultData.at[i, 'EMRF Object Value'] = value
 
+        EMRF.File.to_csv('./Demand/[EMRF]itr-' + str(i) + '.csv', index=False)
+
         # MTWF 테스트
-        MTWF = MTWFEngine(Photo)
+        MTWF = MTWFEngine(copy.deepcopy(Photo))
         start, end = MTWF.StartEnd()
         PrintLog(str(i) + 'th Simulation Start[MTWF] [start, end]= [' + str(start) + str(end) + ']', Ignore=True)
         finish, value = MTWFRun(MTWF)
@@ -473,8 +523,12 @@ def main():
         ResultData.at[i, 'MTWF Finish'] = finish
         ResultData.at[i, 'MTWF Object Value'] = value
 
+        MTWF.File.to_csv('./Demand/[MTWF]itr-' + str(i) + '.csv', index=False)
+
     ResultData.to_csv('./ResultData.csv')
     return None
 
 if __name__ == '__main__':
     main()
+#7 81 532 574 768 783 820 855 904 1017 1026 1161 1177
+#0 1 2 3 5 9 12 13 14 22 24 28
